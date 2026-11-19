@@ -1,0 +1,8 @@
+data/*.xlsx
+data/*.npz
+data/*.npy
+data/*.pkl
+runs/
+logs/
+__pycache__/
+*.keras

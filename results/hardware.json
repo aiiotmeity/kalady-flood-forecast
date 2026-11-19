@@ -1,0 +1,10 @@
+{
+ "platform": "Linux-6.6.159+-x86_64-with-glibc2.39",
+ "python": "3.13.16",
+ "tensorflow": "2.21.0",
+ "gpus": [
+  "/physical_device:GPU:0"
+ ],
+ "processor": "x86_64",
+ "nvidia_smi": "Tesla T4, 15360 MiB\n"
+}
