@@ -22,3 +22,15 @@ On a Tesla T4 GPU (Google Colab) the full run takes about 2 hours. Interrupted r
 
 ## Results
 `results/results.json` and `results/results.txt` contain the results reported in the paper; `results/hardware.json` records the hardware used.
+
+## Trained model
+`model/model.keras` is the trained encoder-decoder LSTM (level-change output, run 1 of 5,
+the run with the median MAE) and `model/scalers.pkl` contains the three fitted scalers
+(past inputs, future inputs, target). Load them with:
+
+    import pickle, tensorflow as tf
+    model = tf.keras.models.load_model('model/model.keras')
+    scaler_past, scaler_future, scaler_y = pickle.load(open('model/scalers.pkl', 'rb'))
+
+The model output is the change in level for each of the six lead hours, in scaled units;
+apply `scaler_y.inverse_transform` and add the last observed level to obtain the forecast in metres.
