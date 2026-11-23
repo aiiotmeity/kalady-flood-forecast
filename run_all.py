@@ -55,7 +55,8 @@ run(['scripts/ev_base.py'], 'logs/ev_base.log')
 print('== 3. LSTM runs')
 jobs = [(c, s) for c in ['proposed_r', 'zerofill_r', 'proposed', 'raw_r', 'noshift_r'] for s in range(1, 6)]
 jobs += [(f'L{L}_r', s) for L in [2, 4, 8, 10] for s in range(1, 4)]
-jobs += [('ev2018_r', s) for s in range(1, 4)]
+jobs += [(c, s) for c in ['ev2018_r', 'ev2018zf_r', 'ev2018raw_r', 'ev2018noshift_r', 'ev2018norain_r']
+         for s in range(1, 6)]   # 2018 flood hold-out: proposed model and ablations, 5 seeds
 for i, (c, s) in enumerate(jobs, 1):
     print(f'  [{i}/{len(jobs)}]', end='')
     run(['scripts/train.py', c, str(s)], f'logs/{c}_s{s}.log')
@@ -63,6 +64,10 @@ for i, (c, s) in enumerate(jobs, 1):
 print('== 4. XGBoost, 5 seeds')
 for s in range(1, 6):
     run(['scripts/xgb.py', str(s)], 'logs/xgb.log')
+
+print('== 4b. XGBoost on the 2018 flood hold-out, 5 seeds')
+for s in range(1, 6):
+    run(['scripts/xgb_event.py', str(s)], 'logs/xgb_event.log')
 
 print('== 5. LIME on the median run')
 import evaluate as ev
@@ -72,13 +77,21 @@ json.dump({'run': rep}, open('rep_run.json', 'w'))
 run(['scripts/lime_run.py', rep, 'subset'], 'logs/lime_sub.log')
 
 print('== 6. Figures and results')
-run(['scripts/fig1.py']); run(['scripts/figs.py']); run(['scripts/report.py'])
+run(['scripts/fig1.py']); run(['scripts/figs.py']); run(['scripts/report.py']); run(['scripts/flood_table.py'])
 info = {'platform': platform.platform(), 'python': platform.python_version(), 'tensorflow': tf.__version__,
-        'gpus': [d.name for d in gpus], 'processor': platform.processor()}
+        'gpus': [d.name for d in gpus], 'processor': platform.processor(), 'cpu_count': os.cpu_count()}
+try:
+    info['cpu_model'] = [l.split(':', 1)[1].strip() for l in open('/proc/cpuinfo') if l.startswith('model name')][0]
+    info['ram_gb'] = round(int([l for l in open('/proc/meminfo') if l.startswith('MemTotal')][0].split()[1]) / 1024 ** 2, 1)
+except Exception:
+    pass
 try:
     info['nvidia_smi'] = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'],
                                         capture_output=True, text=True).stdout
 except Exception:
     pass
-json.dump(info, open('hardware.json', 'w'), indent=1); print(info)
-print('== Done. Zip and send back: results.json, results.txt, hardware.json, figs, logs, runs, lime_subset.npz')
+os.makedirs('results', exist_ok=True)
+for f in ['hardware.json', 'results/hardware.json']:
+    json.dump(info, open(f, 'w'), indent=1)
+print(info)
+print('== Done. Results: results.json, results.txt, results/flood_table.csv, results/hardware.json')

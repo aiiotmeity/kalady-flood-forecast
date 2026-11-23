@@ -1,6 +1,12 @@
 """Train one configuration with one seed and save validation predictions.
 Usage: python train.py CONFIG SEED
-CONFIG in: proposed, zerofill, raw, noshift, L2, L4, L8, L10
+CONFIG in: proposed, zerofill, raw, noshift, L2, L4, L8, L10 (add _r for the level-change output)
+2018 flood hold-out (trained without 30 Jul - 2 Sep 2018, predictions for August 2018 saved as pred_event.npy):
+  ev2018_r          proposed model
+  ev2018zf_r        (a) without mask, zero-filled future rainfall
+  ev2018raw_r       (b) raw instead of routed rainfall
+  ev2018noshift_r   (c) without travel-time shift
+  ev2018norain_r    (d) without any rainfall or discharge inputs
 """
 import sys, os, json, time, pickle
 sys.path.insert(0, os.path.dirname(__file__))
@@ -24,13 +30,14 @@ tf.config.threading.set_intra_op_parallelism_threads(int(os.environ.get('NT', 2)
 kw = {}
 resid = cfg.endswith('_r') or cfg.startswith('r_')
 base_cfg = cfg[:-2] if cfg.endswith('_r') else cfg
-if base_cfg == 'ev2018': kw = {}
-if base_cfg == 'raw': kw = dict(routed=False)
-if base_cfg == 'noshift': kw = dict(shift=False)
-if base_cfg.startswith('L') and base_cfg[1:].isdigit(): kw = dict(L_up=int(base_cfg[1:]))
-mask_mode = 'zerofill' if base_cfg == 'zerofill' else 'masked'
+is_event = base_cfg.startswith('ev2018')
+variant = base_cfg[len('ev2018'):] if is_event else base_cfg   # '', 'zf', 'raw', 'noshift', 'norain'
+if variant == 'raw': kw = dict(routed=False)
+if variant == 'noshift': kw = dict(shift=False)
+if variant.startswith('L') and variant[1:].isdigit(): kw = dict(L_up=int(variant[1:]))
+mask_mode = 'zerofill' if variant in ('zerofill', 'zf') else 'masked'
 
-cache = f'./data/win_{base_cfg if base_cfg in ("raw","noshift") or (base_cfg.startswith("L") and base_cfg[1:].isdigit()) else "base"}.npz'
+cache = f'./data/win_{variant if variant in ("raw","noshift") or (variant.startswith("L") and variant[1:].isdigit()) else "base"}.npz'
 if os.path.exists(cache):
     z = np.load(cache, allow_pickle=True); Xp, Xf, Y = z['Xp'], z['Xf'], z['Y']
 else:
@@ -39,12 +46,20 @@ else:
     np.savez(cache, Xp=Xp, Xf=Xf, Y=Y, t=np.array(t, dtype='datetime64[ns]'))
 if mask_mode == 'zerofill':
     Xf = Xf[:, :, :1]
+if variant == 'norain':
+    # keep the level predictors and the calendar predictors only; drop every rainfall/discharge-derived input
+    keep = [i for i, f in enumerate(pipe.PAST_FEATURES)
+            if pipe.CATEGORY[f] == 'level' or f in ('hour_sin', 'hour_cos', 'month', 'monsoon_flag')]
+    last_level = Xp[:, -1, 0].copy()
+    Xp = Xp[:, :, keep]
+    assert np.allclose(Xp[:, -1, 0], last_level)     # column 0 is still the level
+    Xf = np.zeros_like(Xf[:, :, :1])                  # no future rainfall information
 s = pipe.split(len(Xp))
 import pandas as pd
 tt = pd.DatetimeIndex(np.load(cache, allow_pickle=True)['t'])
 ev = (tt >= '2018-08-01') & (tt <= '2018-08-31 23:00')
 buf = (tt >= '2018-07-30') & (tt <= '2018-09-02')
-tr_idx = np.where((np.arange(len(Xp)) < s) & ~(buf if base_cfg == 'ev2018' else np.zeros(len(Xp), bool)))[0]
+tr_idx = np.where((np.arange(len(Xp)) < s) & ~(buf if is_event else np.zeros(len(Xp), bool)))[0]
 last = Xp[:, -1, 0].reshape(-1, 1, 1)
 if resid:
     Y = Y - last
@@ -68,7 +83,7 @@ h = m.fit([Xp_s[tr_idx], Xf_s[tr_idx]], Y_s[tr_idx], validation_data=([Xp_s[s:],
 pred = sy.inverse_transform(m.predict([Xp_s[s:], Xf_s[s:]], batch_size=512, verbose=0).reshape(-1, 1)).reshape(-1, pipe.HORIZON)
 if resid:
     pred = pred + last[s:, :, 0]
-if base_cfg == 'ev2018':
+if is_event:
     pe = sy.inverse_transform(m.predict([Xp_s[ev], Xf_s[ev]], batch_size=512, verbose=0).reshape(-1, 1)).reshape(-1, pipe.HORIZON)
     np.save(f'{out}/pred_event.npy', pe + (last[ev, :, 0] if resid else 0))
 np.save(f'{out}/pred.npy', pred)
